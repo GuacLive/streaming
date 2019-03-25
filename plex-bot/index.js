@@ -1,7 +1,7 @@
 const PlexAPI = require('plex-api');
 const path = require('path');
 const fs = require('fs');
-const https = require('https');
+const https = require('http');
 const {spawn} = require('child_process');
 const cookie = require('cookie');
 
@@ -13,10 +13,13 @@ const history = require(historyPath);
 
 const plex = new PlexAPI({
   hostname: process.env.PLEX_HOST,
+  port: process.env.PLEX_PORT,
+  https: true,
   username: process.env.PLEX_USER,
   password: process.env.PLEX_PASSWORD,
   managedUser: {
     name: process.env.PLEX_MANAGED_USER,
+    pin: process.env.PLEX_MANAGED_USER_PIN,
   },
   options: {
     identifier: 'plex-stream',
@@ -51,7 +54,7 @@ function selectMediaStreams(previous, movies) {
   });
 }
 
-plex.query('/library/sections/1/all')
+plex.query(`/library/sections/${process.env.PLEX_LIBRARY}/all`)
   .then(result => result.MediaContainer.Metadata
       .map(metadata => ({
         ...metadata,
@@ -101,7 +104,7 @@ function playNext({next: current, audio, video, part}, movies) {
       '-b:a', '160k',
       '-ac', '2',
       '-bufsize', '7000k',
-      '-f', 'flv', process.env.ANGELTHUMP_INGEST,
+      '-f', 'flv', process.env.GUAC_INGEST,
     ];
     const ffmpeg = spawn('ffmpeg', options);
     ffmpeg.stdout.pipe(process.stdout);
@@ -109,10 +112,10 @@ function playNext({next: current, audio, video, part}, movies) {
     ffmpeg.on('close', () => playNext(next, movies));
     ffmpeg.on('error', err => console.log(err));
 
-    angelthumpLogin().then(accessToken => {
+    guacLogin().then(accessToken => {
       const req = https.request({
-        hostname: 'api.angelthump.com',
-        path: '/user/v1/title',
+        hostname: 'api.guac.live',
+        path: '/channel/setTitle',
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -174,25 +177,24 @@ function selectNext(prev, movies) {
   return movies[next[1]];
 }
 
-function angelthumpLogin() {
+function guacLogin() {
   return new Promise(resolve => {
     const req = https.request({
-      hostname: 'angelthump.com',
-      path: '/authentication',
+      hostname: 'api.guac.live',
+      path: '/auth',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
     }, res => res.on('data', data => {
-      const {accessToken} = JSON.parse(data);
+      const {jwtToken} = JSON.parse(data);
       console.log(data.toString());
-      resolve(accessToken);
+      resolve(jwtToken);
     }));
     req.on('error', e => console.error(e));
     req.write(JSON.stringify({
-      strategy: 'local-username',
-      username: process.env.ANGELTHUMP_USER,
-      password: process.env.ANGELTHUMP_PASSWORD,
+      username: process.env.GUAC_USER,
+      password: process.env.GUAC_PASSWORD,
     }));
     req.end();
   });
