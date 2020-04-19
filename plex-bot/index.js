@@ -1,4 +1,3 @@
-const cookie = require('cookie');
 const fetch = require('isomorphic-fetch');
 const fs = require('fs').promises;
 const nameToImdb = require('name-to-imdb');
@@ -6,7 +5,7 @@ const path = require('path');
 const PlexAPI = require('plex-api');
 const {spawn} = require('child_process');
 const {sprintf} = require('sprintf-js');
-const WebSocket = require('ws');
+const {Client} = require('@guaclive/guac.js');
 
 require('dotenv').config()
 const argv = require('minimist')(process.argv.slice(2));
@@ -16,6 +15,8 @@ const history = require(historyPath);
 
 const plex = new PlexAPI({
   hostname: process.env.PLEX_HOST,
+  port: process.env.PLEX_PORT,
+  https: true,
   username: process.env.PLEX_USER,
   password: process.env.PLEX_PASSWORD,
   managedUser: process.env.PLEX_MANAGED_USER && {
@@ -53,7 +54,7 @@ const plex = new PlexAPI({
     try {
       await Promise.allSettled([
         logAsyncFn('playing movie', playMovie(movie, streams, next.movie)),
-        logAsyncFn('updating angelthump', updateAngelthumpTitle(movie)),
+        logAsyncFn('updating guac', updateGuacTitle(movie)),
         logAsyncFn('notifying chat', notifyChat(movie)),
       ]);
     } catch (e) {
@@ -66,6 +67,9 @@ const plex = new PlexAPI({
 
 async function loadPlaylists() {
   const playlistsRes = await plex.query('/playlists');
+  if (!playlistsRes.MediaContainer.Metadata) {
+    playlistsRes.MediaContainer.Metadata = [];
+  }
   const metadata = await Promise.all(playlistsRes.MediaContainer.Metadata
     .map(({key}) => plex.query(key).then(res => res.MediaContainer.Metadata)));
   const index = metadata.flat().reduce((index, {key}) => ({...index, [key]: true}), {});
@@ -220,7 +224,7 @@ function playMovie(movie, {audio, video, file}, nextMovie) {
     '-b:a', '160k',
     '-ac', '2',
     '-bufsize', '7000k',
-    '-f', 'flv', process.env.ANGELTHUMP_INGEST,
+    '-f', 'flv', process.env.GUAC_INGEST,
   ];
   const ffmpeg = spawn('ffmpeg', options);
   ffmpeg.stdout.pipe(process.stdout);
@@ -243,9 +247,9 @@ async function appendToHistory(movie) {
   await fs.writeFile(historyPath, JSON.stringify(history, null, 2));
 }
 
-async function updateAngelthumpTitle(movie) {
-  const accessToken = await createAngelthumpToken();
-  const res = await fetch('https://api.angelthump.com/user/v1/title', {
+async function updateGuacTitle(movie) {
+  const accessToken = await createGuacToken();
+  const res = await fetch('https://api.guac.live/channel/setTitle', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -256,42 +260,39 @@ async function updateAngelthumpTitle(movie) {
   return await res.text()
 }
 
-async function createAngelthumpToken() {
-  const res = await fetch('https://sso.angelthump.com/authentication', {
+async function createGuacToken() {
+  const res = await fetch('https://api.guac.live/auth', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      strategy: 'local',
-      username: process.env.ANGELTHUMP_USER,
-      password: process.env.ANGELTHUMP_PASSWORD,
+      username: process.env.GUAC_USER,
+      password: process.env.GUAC_PASSWORD,
     }),
   });
-  const {accessToken} = await res.json();
-  return accessToken;
+  const {jwtToken} = await res.json();
+  return jwtToken;
 }
 
 async function notifyChat(movie) {
-  const options = {
-    headers: {
-      Cookie: cookie.serialize('jwt', process.env.STRIMS_JWT),
-    },
-  };
-  const ws = new WebSocket('wss://chat.strims.gg/ws', [], options);
+  let c = new Client({
+    clientType: 'user'
+  });
+  c.connect(await createGuacToken(), process.env.GUAC_USER);
 
   const [imdbUrl] = await Promise.all([
     getImdbUrl(movie),
     new Promise((resolve, reject) => {
-      ws.on('open', resolve);
-      ws.on('error', reject);
+      c.on('join', resolve);
+      c.on('error', reject);
     }),
   ]);
 
   const imdbInfo = imdbUrl && ` - ${imdbUrl} (${movie.rating})`;
-  let data = `${process.env.STRIMS_EMOTE} ${movie.title} (${movie.year})${imdbInfo} started at ${process.env.STRIMS_URL}`;
-  ws.send('MSG ' + JSON.stringify({data}));
-  ws.close();
+  let data = `${process.env.GUAC_EMOTE} ${movie.title} (${movie.year})${imdbInfo} started`;
+  c.say(data);
+  c.io.disconnect();
 }
 
 async function getImdbUrl(movie) {
