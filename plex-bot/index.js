@@ -252,6 +252,7 @@ async function appendToHistory(movie) {
 async function updateGuacTitle(movie) {
   const accessToken = await createGuacToken();
   const res = await fetch('https://api.guac.live/channel/setTitle', {
+    method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${accessToken}`,
