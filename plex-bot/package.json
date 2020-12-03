@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {},
   "dependencies": {
-    "@guaclive/guac.js": "^1.0.2",
+    "@guaclive/guac.js": "^1.0.3",
     "cookie": "^0.3.1",
     "dotenv": "^6.2.0",
     "es6-promise": "^4.2.8",
